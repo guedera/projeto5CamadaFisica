@@ -1,38 +1,67 @@
-const int TX_PIN = 7; // Pino digital para transmissão
+const int TX_PIN = 7;  
 const int BAUDRATE = 9600;
-const int BIT_DELAY = 1000000 / BAUDRATE; // Tempo entre bits em microssegundos
+const int BIT_DELAY = 1000000 / BAUDRATE;
+const unsigned long CHAR_INTERVAL = 1000000;
+
+const char currentChar = 'A';
+unsigned long lastTransmitTime = 0; 
+boolean isSending = false;       
+int currentBit = 0;            
+byte dataToSend = 0;           
+byte parityBit = 0;               
+unsigned long bitStartTime = 0;
 
 void setup() {
     pinMode(TX_PIN, OUTPUT);
-    digitalWrite(TX_PIN, HIGH); // Linha ociosa em HIGH
+    digitalWrite(TX_PIN, HIGH);
+    Serial.begin(9600);
+    lastTransmitTime = micros();
 }
 
 void loop() {
-    char data = 'A'; // Caractere a ser transmitido
-    sendUART(data);
-    delay(1000); // Espera para repetir a transmissão
-}
+    unsigned long currentTime = micros();
+    
+    if (!isSending && (currentTime - lastTransmitTime >= CHAR_INTERVAL)) {
+        // Inicia a transmissão do caractere 'A'
+        dataToSend = currentChar;
+        parityBit = calcParity(dataToSend);
+        isSending = true;
+        currentBit = -1;
+        bitStartTime = currentTime;
 
-void sendUART(char data) {
-    byte parity = calcParity(data); // Calcula bit de paridade
-    
-    // Enviar bit de start (LOW)
-    digitalWrite(TX_PIN, LOW);
-    delayMicroseconds(BIT_DELAY);
-    
-    // Enviar 8 bits de dados
-    for (int i = 0; i < 8; i++) {
-        digitalWrite(TX_PIN, (data >> i) & 1);
-        delayMicroseconds(BIT_DELAY);
+        Serial.print("Enviando: ");
+        Serial.println((char)dataToSend);
     }
     
-    // Enviar bit de paridade
-    digitalWrite(TX_PIN, parity);
-    delayMicroseconds(BIT_DELAY);
-    
-    // Enviar bit de stop (HIGH)
-    digitalWrite(TX_PIN, HIGH);
-    delayMicroseconds(BIT_DELAY);
+    if (isSending && (currentTime - bitStartTime >= BIT_DELAY)) {
+        bitStartTime = currentTime;
+        
+        if (currentBit == -1) {
+            // Envia start bit (LOW)
+            digitalWrite(TX_PIN, LOW);
+            currentBit++;
+        } 
+        else if (currentBit >= 0 && currentBit < 8) {
+            // Envia os 8 bits de dados
+            digitalWrite(TX_PIN, (dataToSend >> currentBit) & 1);
+            currentBit++;
+        } 
+        else if (currentBit == 8) {
+            // Envia bit de paridade
+            digitalWrite(TX_PIN, parityBit);
+            currentBit++;
+        } 
+        else if (currentBit == 9) {
+            // Envia stop bit (HIGH)
+            digitalWrite(TX_PIN, HIGH);
+            currentBit++;
+        } 
+        else {
+            // Completa a transmissão
+            isSending = false;
+            lastTransmitTime = currentTime;
+        }
+    }
 }
 
 byte calcParity(byte data) {
