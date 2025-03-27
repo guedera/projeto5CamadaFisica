@@ -1,169 +1,160 @@
-guedera: Explique o que o projeto deve fazer, a lógica de funcionamento e como cada código .ino funciona!
+# Projeto de Comunicação Física - Transmitter
 
-GitHub Copilot: # Projeto de Comunicação UART entre Arduinos
+O Transmitter é responsável por enviar dados de forma serial, bit a bit, utilizando um protocolo simples que inclui bits de início, dados, paridade e parada. Abaixo está uma explicação linha a linha do código do Transmitter e os conceitos envolvidos.
 
-Este projeto implementa uma comunicação serial UART (Universal Asynchronous Receiver-Transmitter) entre dois Arduinos usando pinos digitais genéricos, ao invés dos pinos TX/RX padrão. Vou explicar como funciona o sistema completo, o protocolo UART e detalhar o funcionamento de cada parte.
+---
 
-## Objetivo do Projeto
+## Explicação do Código
 
-O objetivo é criar um sistema de comunicação serial entre dois Arduinos, onde:
-- Um Arduino funciona como transmissor, enviando dados
-- Outro Arduino funciona como receptor, recebendo e interpretando esses dados
-- A comunicação segue o protocolo UART completo com detecção de erros
+### Definições Iniciais
+```ino
+const int TX_PIN = 7;  
+const int BAUDRATE = 9600;
+const int BIT_DELAY = 1000000 / BAUDRATE;
+const unsigned long CHAR_INTERVAL = 1000000;
+```
+- `TX_PIN`: Define o pino digital usado para transmissão.
+- `BAUDRATE`: Taxa de transmissão em bits por segundo (bps).
+- `BIT_DELAY`: Calcula o tempo necessário para transmitir um bit, em microssegundos.
+- `CHAR_INTERVAL`: Intervalo entre o envio de caracteres, em microssegundos.
 
-## Protocolo UART Implementado
+```ino
+const char currentChar = 'A';
+unsigned long lastTransmitTime = 0; 
+boolean isSending = false;       
+int currentBit = 0;            
+byte dataToSend = 0;           
+byte parityBit = 0;               
+unsigned long bitStartTime = 0;
+```
+- `currentChar`: O caractere que será enviado (neste caso, sempre 'A').
+- `lastTransmitTime`: Marca o tempo da última transmissão.
+- `isSending`: Indica se o Transmitter está enviando dados.
+- `currentBit`: Controla qual bit está sendo enviado no momento.
+- `dataToSend`: Armazena o dado a ser enviado.
+- `parityBit`: Calcula o bit de paridade para verificação de erros.
+- `bitStartTime`: Marca o início do envio de cada bit.
 
-O UART é um protocolo de comunicação serial que utiliza:
+---
 
-1. **Start bit**: Sinal LOW que indica o início da transmissão
-2. **8 bits de dados**: Os bits de informação transmitidos sequencialmente (LSB primeiro)
-3. **Bit de paridade**: Um bit adicional para detecção de erros (neste caso, paridade par)
-4. **Stop bit**: Sinal HIGH que indica o fim da transmissão
+### Configuração Inicial
+```ino
+void setup() {
+    pinMode(TX_PIN, OUTPUT);
+    digitalWrite(TX_PIN, HIGH);
+    Serial.begin(9600);
+    lastTransmitTime = micros();
+}
+```
+- Configura o pino de transmissão como saída (`OUTPUT`).
+- Define o estado inicial do pino como `HIGH` (nível lógico alto).
+- Inicializa a comunicação serial para depuração.
+- Armazena o tempo inicial para controle do intervalo entre transmissões.
 
-A taxa de comunicação é configurada para 9600 baud, o que significa 9600 bits por segundo, resultando em aproximadamente 104 microssegundos por bit.
+---
 
-## Funcionamento do Arduino Transmissor (Transmitter.ino)
+### Loop Principal
+```ino
+void loop() {
+    unsigned long currentTime = micros();
+```
+- Obtém o tempo atual em microssegundos para controlar os intervalos de transmissão.
 
-O transmissor executa as seguintes operações:
+#### Início da Transmissão
+```ino
+    if (!isSending && (currentTime - lastTransmitTime >= CHAR_INTERVAL)) {
+        dataToSend = currentChar;
+        parityBit = calcParity(dataToSend);
+        isSending = true;
+        currentBit = -1;
+        bitStartTime = currentTime;
 
-1. **Configuração inicial**:
-   - Define o pino 7 como TX (saída)
-   - Mantém a linha em HIGH quando ociosa (idle)
-   - Configura a taxa de transmissão para 9600 baud
+        Serial.print("Enviando: ");
+        Serial.println((char)dataToSend);
+    }
+```
+- Verifica se não está enviando e se o intervalo entre transmissões foi atingido.
+- Prepara o dado a ser enviado (`dataToSend`) e calcula o bit de paridade.
+- Define que a transmissão está ativa (`isSending = true`) e reinicia o controle de bits.
+- Exibe no monitor serial o caractere que será enviado.
 
-2. **Loop principal**:
-   - Envia sequencialmente caracteres de 'A' a 'Z'
-   - Entre cada transmissão, aguarda 1 segundo
-   - Quando chega em 'Z', reinicia com 'A'
+#### Envio dos Bits
+```ino
+    if (isSending && (currentTime - bitStartTime >= BIT_DELAY)) {
+        bitStartTime = currentTime;
+```
+- Verifica se está enviando e se o tempo necessário para enviar o próximo bit foi atingido.
 
-3. **Função de transmissão UART (uartTransmit)**:
-   - Calcula o bit de paridade para o byte a ser enviado
-   - Envia o start bit (LOW)
-   - Envia os 8 bits de dados, começando pelo LSB
-   - Envia o bit de paridade
-   - Envia o stop bit (HIGH)
-   - Usa temporizações precisas com `preciseMicrosDelay()` para manter o tempo correto entre bits
+##### Envio do Start Bit
+```ino
+        if (currentBit == -1) {
+            digitalWrite(TX_PIN, LOW);
+            currentBit++;
+        }
+```
+- O start bit é sempre `LOW` (nível lógico baixo) e indica o início da transmissão.
 
-## Funcionamento do Arduino Receptor (Receiver.ino)
+##### Envio dos Bits de Dados
+```ino
+        else if (currentBit >= 0 && currentBit < 8) {
+            digitalWrite(TX_PIN, (dataToSend >> currentBit) & 1);
+            currentBit++;
+        }
+```
+- Envia os 8 bits do dado, um por vez, deslocando o bit correspondente para a posição menos significativa e aplicando um `AND` lógico.
 
-O receptor executa as seguintes operações:
+##### Envio do Bit de Paridade
+```ino
+        else if (currentBit == 8) {
+            digitalWrite(TX_PIN, parityBit);
+            currentBit++;
+        }
+```
+- Envia o bit de paridade, que é usado para detectar erros na transmissão.
 
-1. **Configuração inicial**:
-   - Define o pino 8 como RX (entrada)
-   - Configura para a mesma taxa de recepção (9600 baud)
+##### Envio do Stop Bit
+```ino
+        else if (currentBit == 9) {
+            digitalWrite(TX_PIN, HIGH);
+            currentBit++;
+        }
+```
+- O stop bit é sempre `HIGH` (nível lógico alto) e indica o fim da transmissão.
 
-2. **Loop principal**:
-   - Aguarda constantemente por dados recebidos
-   - Quando um caractere é recebido, mostra no monitor serial
-   - Reporta erros de paridade ou de framing, caso ocorram
+##### Finalização da Transmissão
+```ino
+        else {
+            isSending = false;
+            lastTransmitTime = currentTime;
+        }
+    }
+}
+```
+- Finaliza a transmissão e atualiza o tempo da última transmissão.
 
-3. **Função de recepção UART (uartReceive)**:
-   - Espera pelo start bit (transição de HIGH para LOW)
-   - Verifica se é realmente um start bit válido
-   - Lê os 8 bits de dados no meio de cada período de bit
-   - Lê o bit de paridade
-   - Lê o stop bit
-   - Verifica se há erros (paridade incorreta ou stop bit ausente)
-   - Retorna o byte recebido e o status da recepção
+---
 
-## Detecção de Erros
+### Função de Cálculo de Paridade
+```ino
+byte calcParity(byte data) {
+    byte parity = 0;
+    for (int i = 0; i < 8; i++) {
+        parity ^= (data >> i) & 1;
+    }
+    return parity;
+}
+```
+- Calcula a paridade ímpar do dado, aplicando a operação XOR em todos os bits.
+- A paridade ímpar é 1 se o número de bits 1 no dado for ímpar, e 0 caso contrário.
 
-O projeto implementa detecção de erros por:
+---
 
-1. **Paridade par**: O bit de paridade é calculado para que o número total de bits '1' (incluindo o bit de paridade) seja par. Qualquer falha é reportada como "ERRO: Paridade incorreta detectada!"
+## Conceitos Envolvidos
 
-2. **Verificação de frame**: Confirma se o stop bit é recebido corretamente. Em caso de erro, reporta "ERRO: Stop bit incorreto detectado!"
+1. **Comunicação Serial**: Envia dados bit a bit em sequência, utilizando um único fio de transmissão.
+2. **Start e Stop Bits**: Sinalizam o início e o fim de cada caractere transmitido.
+3. **Paridade**: Técnica simples de detecção de erros, verificando se o número de bits 1 é par ou ímpar.
+4. **Taxa de Baud (Baudrate)**: Define a velocidade de transmissão em bits por segundo.
+5. **Microssegundos**: Unidade de tempo usada para controlar os intervalos de transmissão.
 
-## Temporização Precisa
-
-Um elemento-chave do projeto é a função `preciseMicrosDelay()` que mantém a sincronização temporal:
-- Usa `micros()` para medir o tempo com precisão
-- Implementa um loop com instrução `NOP` (No Operation) para evitar otimizações do compilador
-- Garante que cada bit tenha exatamente a duração necessária para manter os 9600 baud
-
-Este projeto demonstra os princípios fundamentais da comunicação serial e como a camada física de um sistema de comunicação pode ser implementada usando recursos básicos de hardware digital.
-
-guedera: Me de essa descrição que você acaba de fornecer em markdown
-
-GitHub Copilot: # Projeto de Comunicação UART entre Arduinos
-
-Este projeto implementa uma comunicação serial UART (Universal Asynchronous Receiver-Transmitter) entre dois Arduinos usando pinos digitais genéricos, ao invés dos pinos TX/RX padrão. Vou explicar como funciona o sistema completo, o protocolo UART e detalhar o funcionamento de cada parte.
-
-## Objetivo do Projeto
-
-O objetivo é criar um sistema de comunicação serial entre dois Arduinos, onde:
-- Um Arduino funciona como transmissor, enviando dados
-- Outro Arduino funciona como receptor, recebendo e interpretando esses dados
-- A comunicação segue o protocolo UART completo com detecção de erros
-
-## Protocolo UART Implementado
-
-O UART é um protocolo de comunicação serial que utiliza:
-
-1. **Start bit**: Sinal LOW que indica o início da transmissão
-2. **8 bits de dados**: Os bits de informação transmitidos sequencialmente (LSB primeiro)
-3. **Bit de paridade**: Um bit adicional para detecção de erros (neste caso, paridade par)
-4. **Stop bit**: Sinal HIGH que indica o fim da transmissão
-
-A taxa de comunicação é configurada para 9600 baud, o que significa 9600 bits por segundo, resultando em aproximadamente 104 microssegundos por bit.
-
-## Funcionamento do Arduino Transmissor (Transmitter.ino)
-
-O transmissor executa as seguintes operações:
-
-1. **Configuração inicial**:
-   - Define o pino 7 como TX (saída)
-   - Mantém a linha em HIGH quando ociosa (idle)
-   - Configura a taxa de transmissão para 9600 baud
-
-2. **Loop principal**:
-   - Envia sequencialmente caracteres de 'A' a 'Z'
-   - Entre cada transmissão, aguarda 1 segundo
-   - Quando chega em 'Z', reinicia com 'A'
-
-3. **Função de transmissão UART (uartTransmit)**:
-   - Calcula o bit de paridade para o byte a ser enviado
-   - Envia o start bit (LOW)
-   - Envia os 8 bits de dados, começando pelo LSB
-   - Envia o bit de paridade
-   - Envia o stop bit (HIGH)
-   - Usa temporizações precisas com `preciseMicrosDelay()` para manter o tempo correto entre bits
-
-## Funcionamento do Arduino Receptor (Receiver.ino)
-
-O receptor executa as seguintes operações:
-
-1. **Configuração inicial**:
-   - Define o pino 8 como RX (entrada)
-   - Configura para a mesma taxa de recepção (9600 baud)
-
-2. **Loop principal**:
-   - Aguarda constantemente por dados recebidos
-   - Quando um caractere é recebido, mostra no monitor serial
-   - Reporta erros de paridade ou de framing, caso ocorram
-
-3. **Função de recepção UART (uartReceive)**:
-   - Espera pelo start bit (transição de HIGH para LOW)
-   - Verifica se é realmente um start bit válido
-   - Lê os 8 bits de dados no meio de cada período de bit
-   - Lê o bit de paridade
-   - Lê o stop bit
-   - Verifica se há erros (paridade incorreta ou stop bit ausente)
-   - Retorna o byte recebido e o status da recepção
-
-## Detecção de Erros
-
-O projeto implementa detecção de erros por:
-
-1. **Paridade par**: O bit de paridade é calculado para que o número total de bits '1' (incluindo o bit de paridade) seja par. Qualquer falha é reportada como "ERRO: Paridade incorreta detectada!"
-
-2. **Verificação de frame**: Confirma se o stop bit é recebido corretamente. Em caso de erro, reporta "ERRO: Stop bit incorreto detectado!"
-
-## Temporização Precisa
-
-Um elemento-chave do projeto é a função `preciseMicrosDelay()` que mantém a sincronização temporal:
-- Usa `micros()` para medir o tempo com precisão
-- Implementa um loop com instrução `NOP` (No Operation) para evitar otimizações do compilador
-- Garante que cada bit tenha exatamente a duração necessária para manter os 9600 baud
-
-Este projeto demonstra os princípios fundamentais da comunicação serial e como a camada física de um sistema de comunicação pode ser implementada usando recursos básicos de hardware digital.
+Com isso, o Transmitter envia o caractere 'A' repetidamente, garantindo que os dados sejam transmitidos de forma confiável e verificável.
